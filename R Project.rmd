@@ -1,0 +1,226 @@
+---
+title: "Weather Forcaster"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, cache=TRUE, autodep=TRUE, 
+                      cache.comments=FALSE, message=F, warning=F)
+
+library(tidyverse)
+library(lubridate)
+library(kableExtra)
+library(modelr)
+```
+
+## Introduction
+
+This report analyzes and creates a correlation between the trends in bike sharing in London during 2015 and 2016. It also creates a regression model to predict the number of bikes rented on a given day if we know the temperature, weather type, and type of day.In London, bike sharing is quite popular among it's residents; it's a clean and cheap way to commute in the city. However, unlike cars, biking is really affected by the weathers outsides. What's more, we did further researches as people's habits may be vary on different days. This report, for example, would answer the questions:
+
+-   What is the effect of temperature on the number of bikes rented?
+-   What is the effect of weather on the number if bikes rented?
+-   Do people rent more or less bikes on a holiday?
+-   Do people rent more or less bikes on a weekend?
+
+## Background
+
+In this research, our goal is to find a way to predict how many people are going to use the Santander bikes with the historical data in London. We built a multiple regression model with some variables such as the weathers, trying to achieve the goal.
+
+#### The Data:
+
+The data set that we will be working with is available on [kaggle.com](https://www.kaggle.com/hmavrodiev/london-bike-sharing-dataset). This is the historical data for bike sharing in London. Hristo Mavrodiev, a Geographic Information Systems technician living in Bulgaria took the individual data from three sources and combined them to make one csv file and put it on kaggle. The three data sources are listed below:
+
+-   Bike sharing data complied by the UK Government - [cycling.data.tfl.gov.uk](https://cycling.data.tfl.gov.uk/).
+-   Weather data in London - [freemeteo.com](https://i-weather.com/weather/london/daily-forecast/today/?gid=2643743&language=english&country=united-kingdom).
+-   Holiday data from 1/1/2015 to 31/12/2016 - [gov.uk](https://www.gov.uk/bank-holidays).
+
+There might be discrepancies in inference due to human error in collecting and compiling the three data sets. The data set on Kaggle, is a record of the number of bikes rented during a specific interval of time and the weather conditions during the interval. It contains data from 1/1/2015 to 31/12/2016. It does not represent a sample from some larger group.
+
+#### Changes to Data Set:
+
+We shall first clean the data and make it easy to use. We will exclude columns from the data set that are not relevant to answer our questions of interest and rename 2 variables and deleted some variables that are not relevant. The Kaggle data set after making all the changes is printed below.
+
+```{r,echo=F}
+
+lby=read_csv("./data/london_merged.csv") %>% 
+  rename(bikes_used = cnt,
+         temperature = t1) %>% 
+  select(-t2,-wind_speed)
+
+g1=lby %>% 
+  mutate(weather=case_when(weather_code%in% c(7,26,10,94)~1,T~0),date=as.Date(timestamp)) %>% 
+  select(-timestamp) %>%
+  group_by(date) %>%
+  summarise(bikes_used=mean(bikes_used),temperature=mean(temperature),weather=sum(weather),holiday=sum(is_holiday),weekend=sum(is_weekend)) %>%
+  mutate(weather=case_when(weather== 0 ~ "good weahter",T~"bad weather"),holiday=case_when(holiday== 0 ~ "Not a Holiday",T~"A Holiday"),weekend=case_when(weekend== 0 ~ "Not a weekend",T~"A weekend")) %>% slice(-c(187,215))
+
+g1 %>%
+  print()
+```
+
+#### Important Variables:
+
+There are 6 columns and 730 rows in our data set. The key data variables that we use to answer the questions of interest are:
+
+```{r, echo = FALSE}
+
+Ba = tibble(
+  Name = c("timestamp", "bikes_used", "temperature","weather_code","is_holiday","is_weekend","season"),
+  Description = c("The date (yyyy-mm-dd format) and time",
+                  "The number of bikes rented by London Residents",
+                  "Temperature in Celsius",
+                  "Integer number representing the categories of weather in London.",
+                  "Boolean value. True if it is holiday and False if not",
+                  "Boolean value. False if it is a weekday and True if not",
+                  "Integer number representing the season: 0-spring ; 1-summer; 2-fall; 3-winter"))
+Ba %>% 
+  kable(caption = "Key Variables from London bike sharing dataset") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+               bootstrap_options = c("striped"))
+
+Ba1= tibble(
+  Code = c("1", "2", "3", "4","7","10","26","94"),
+  Description = c("Clear; mostly clear but has some haze / fog / patches of fog",
+                  "Scattered clouds / few clouds",
+                  "Broken clouds",
+                  "Cloudy",
+                  "Rain / light Rain shower / Light rain",
+                  "Rain with thunderstorm",
+                  "Snowfall",
+                  "Freezing Fog"))
+Ba1 %>% 
+  kable(caption = "Details for weather code variable") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+               bootstrap_options = c("striped"))
+
+Ba2= tibble(
+  Codes = c("1,2,3 and 4", "7,10,26 and 94"),
+  Description = c("Good weather codes",
+                  "Bad weather codes"))
+Ba2 %>% 
+  kable(caption = "Simplification of weather codes") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+               bootstrap_options = c("striped"))
+
+Ba3= tibble(
+  Value = c("0", "1"),
+  Description = c("Not a holiday",
+                  "Is a holiday"))
+Ba3 %>% 
+  kable(caption = "Possible values for the is_holiday variable") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+               bootstrap_options = c("striped"))
+Ba4= tibble(
+  Name = c("0", "1"),
+  Description = c("Not a Saturday / Sunday",
+                  "Is a Saturday / Sunday"))
+Ba4 %>% 
+  kable(caption = "Possible values for the is_weekend variable") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+               bootstrap_options = c("striped"))
+
+```
+
+### The outliers
+
+The outliers are July 9th and August 6th. On both July 9th, 2015 and August 6th, 2015, there were tube strikes taking place in London.
+
+### The Analysis:
+
+We first examine `temperature` which is the variable that we believe has the most effect on the number of people that use bike sharing.
+
+```{r,include=F}
+g1a=lm(bikes_used ~ temperature,data=g1)
+summary(g1a)
+```
+
+```{r,echo=F,fig.height = 3, fig.cap ="**Relationship between temperature and number of bikes used.** The dots show the number of bikes used under different temperatures. The blue line shows how the number of bikes used respond to the changes of the temperature"}
+
+ggplot(g1,aes(x=temperature,y=bikes_used)) +
+  geom_point()+ 
+  geom_smooth(se=F,method="lm")+
+  xlab("Temperature in (\u00B0C)") +
+  ylab("Number of Bikes used")+
+  ggtitle("Scatterplot of the number of bikes used and the temperatures")
+
+```
+
+This scatter plot shows the correlation between average number of bikes used each month and the average temperature. As shown above, there is a very strong correlation between two variables. All the dots are close to the trend line. To sum up, the number of people that use a bike will go up as the temperature goes up. For the regression model, we can see both the intercept and temperature are significant according to the t value. The R-squared shows a good trend that more people use the bikes as temperature goes up.
+
+#### To take into account weather conditions, we will now add another variable to the regression model - `weather_code`.
+
+We will differentiate between good weather and bad weather using the weather codes. Please refer to the table under the Important Variables section above.
+
+```{r,include=F}
+g1b=lm(bikes_used ~ temperature+weather,data=g1)
+summary(g1b)
+```
+
+```{r,echo=F,fig.height = 3, fig.cap ="**Relationship between the weather conditions and number of bikes used.** The red box represents good weather. The blue box represents bad weather"}
+
+ggplot(g1,aes(x=weather,y=bikes_used,fill=weather)) +
+  geom_boxplot() +
+  xlab("Whether it is a bad weather") +
+  ylab("Number of Bikes used")+
+  ggtitle("Comparision of number of bike used under different weather conditions")
+```
+
+-   As we add the weather conditions to the model, the R-squared raised to 0.5944. We note that the adjusted R-squared also raises to 0.5933 compared to 0.4756 from the last model. Weather's t value is -14.55 which is significant.
+-   The visual evidence from the graph tells us that there is a difference in the mean of number of bikes used under two different weather condition. If there is bad weather, the graph infers that fewer people use the bike sharing.
+
+#### The next add variable we add to the regression model is `is_holiday`.
+
+```{r,include=F}
+g1c=lm(bikes_used ~ temperature+weather+holiday,data=g1)
+summary(g1c)
+```
+
+```{r,echo=F,fig.height = 3, fig.cap ="**Relationship between if it's the holiday and number of bikes used.** The red box represents when it is a regular day. The blue box when represents it is a holiday"}
+
+ggplot(g1,aes(x=holiday,y=bikes_used,fill=holiday)) +
+  geom_boxplot() +
+  xlab("Whether it is a holiday") +
+  ylab("Number of Bikes used")+
+  ggtitle("Comparision of number of bike used on a holiday or not")
+```
+
+-   As we add the `is_holiday` variable to the model, the R-squared raised to 0.6103. We note that the adjusted R-squared also raises to 0.6086 compared to 0.5933 from the last model. `is_holday` variable's t value is -5.436 which is significant.
+-   The visual evidence from the graph is that there is a difference in the mean of number of bikes used on a holiday and a regular day. On a holiday, people used less bikes than on a day that is not a holiday.
+-   This can be explained by the fact that on holidays, people may tend to go out less since workers and students have their day off.
+
+#### We finally add the last variable to the regression model: `is_weekend`.
+
+```{r,include=F}
+g1d=lm(bikes_used ~ temperature+weather+holiday+weekend,data=g1)
+summary(g1d)
+```
+
+```{r,echo=F, fig.height = 3, fig.cap ="**Relationship between if it is a Saturday / Sunday and number of bikes used.** The red box represents when it is a regular day. The blue box when represents it is a Saturday / Sunday"}
+
+ggplot(g1,aes(x=weekend,y=bikes_used,fill=weekend)) +
+  geom_boxplot() +
+  xlab("Whether it is a Saturday / Sunday") +
+  ylab("Number of Bikes used")+
+  ggtitle("Comparision of number of bike used on a Saturday / Sunday vs a weekday")
+```
+
+-   As we add the weekend variable to the model, the R-squared reaches 0.6914. Again, adjusted R-squared is raised to 0.6897 compared to 0.6086 from the last model, which means adding weekend variable has a significant effect.`is_ weekend` variable's t value is -13.802 which is really significant.
+-   The visual evidence from the graph is that there is difference in the mean of number of bikes used on a Saturday / Sunday vs a weekday. On a Saturday / Sunday day, people used less bikes than on a weekday.
+-   This can be explained by the fact that on a Saturday / Sunday, people may tend to go out less since workers and students have their day off.
+
+### Discussion
+
+We have been able to create model with any results coming out from our models. Every variable we added into the model raises the R-squared value, proving that every addition improves our model's efficiency. The Coefficient of Determinant of the model is 0.6914, which means that there is a relatively strong positive correlation between number of bikes used and the four variables we looked at earlier. Although the model shows promise, we cannot be completely certain of it's accuracy because of the many unknown variables in play. Since the data is published by official government agencies, we believe that it should be accurate. However data collection is still prone to human error and random variance. We assume that the population is every resident of London that rented a bike. Since we take a sample of this population as our data, random sampling variability might affect our model and skew predictions. Other variables that may have unknown effects on our model are: price fluctuations in the rent of bikes, availability or unavailability of other forms of transportation, and influence of events (such as musical concerts, festivities) which may cause sudden surges in the number of bikes rented.
+
+### Conclusion
+
+#### The equation for our model is $Y=774.974+46.342X_1-239.045X_2-376.162X_3-227.703X_4$
+
+With the model we built, we can prediction how many bikes are rented on day depending on weather conditions. Y is the number of people will use the sharing bikes. $X_1$ is the temperature, $X_2$ is the weather condition, $X_3$ indicates whether it's a holiday and $X_4$ indicates whether it's a weekend. For example, if tomorrow's temperature is 15 Celsius, good weather, not a holiday and is a weekend, what's the possible number of people that will use bike sharing? With our model, we could give a prediction! 774.874 + 46.342*15 - 239.045*0 - 376.162*0 - 227.703*1= 1242.301 bikes may be rented on that day.
+
+### References:
+
+-   <https://www.kaggle.com/hmavrodiev/london-bike-sharing-dataset>
+-   <https://cycling.data.tfl.gov.uk/>
+-   <https://i-weather.com/weather/london/daily-forecast/today/?gid=2643743&language=english&country=united-kingdom>
+-   <https://www.gov.uk/bank-holidays>
